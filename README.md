@@ -1,3 +1,3 @@
 # squeryl-cats-effect
 
-Nothing to see here... yet
+This is the work of evil, don't even think of running it in production
