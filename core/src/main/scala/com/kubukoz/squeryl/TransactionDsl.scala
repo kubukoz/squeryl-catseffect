@@ -6,18 +6,22 @@ import cats.effect.{Bracket, Resource, Sync}
 import cats.implicits._
 import cats.tagless.finalAlg
 import com.kubukoz.squeryl
+import javax.sql.DataSource
 import org.squeryl.{AbstractSession, Session}
 import org.squeryl.dsl.QueryDsl
+import org.squeryl.internals.DatabaseAdapter
 
 @finalAlg
 trait SessionFactoryAlg[F[_]] {
-  def newSession: Resource[F, PureSession[F]]
-  def inNewSession[A](fa: F[A]): F[A] //= SessionFactoryAlg[F].newSession.use(_.withinTransaction(fa))
+  def newSession: F[PureSession[F]]
+  //utility - not directly connected with squeryl
+  def inNewSession[A](fa: F[A]): F[A] // = newSession.flatMap(_.withinTransaction(fa))
 }
 
-//corresponds to a `Session`
+//corresponds to an `AbstractSession`
 @finalAlg
 trait PureSession[F[_]] {
+  def using[A](fa: F[A]): F[A]
   def withinTransaction[A](fa: F[A]): F[A]
   def unbindFromCurrentThread: F[Unit]
   def bindToCurrentThread: F[Unit]
@@ -36,7 +40,7 @@ object PureSession {
         /**
           * Adapted from AbstractSession#using
           * */
-        override def withinTransaction[A](fa: F[A]): F[A] = {
+        override def using[A](fa: F[A]): F[A] = {
           SessionAlg[F].currentSessionOption.flatMap { currentSessionOpt =>
             val currentResource: Resource[F, Unit] = currentSessionOpt.traverse_ { ses =>
               Resource.make(ses.unbindFromCurrentThread)(_ => ses.bindToCurrentThread)
@@ -49,6 +53,8 @@ object PureSession {
             currentAndThis.use(_ => fa)
           }
         }
+
+        override def withinTransaction[A](fa: F[A]): F[A] = ??? //no idea man
 
         override private[squeryl] def cleanup: F[Unit] = Sync[F].delay(abs.cleanup)
       }
@@ -65,7 +71,7 @@ trait SessionAlg[F[_]] {
 
 object SessionAlg {
 
-  def derive[F[_]: Sync]: SessionAlg[F] = new SessionAlg[F] { self =>
+  def unsafeDerive[F[_]: Sync]: SessionAlg[F] = new SessionAlg[F] { self =>
     override val hasCurrentSession: F[Boolean] = Sync[F].delay(Session.hasCurrentSession)
     override val currentSession: F[PureSession[F]] = {
       val current = Sync[F].delay(Session.currentSession)
